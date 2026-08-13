@@ -3,8 +3,6 @@
 package com.gios.walltakerchanger
 
 import android.annotation.SuppressLint
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Context
@@ -18,8 +16,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.os.PowerManager.WakeLock
 import android.provider.Settings
@@ -37,10 +33,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
 import com.bumptech.glide.Glide
-import com.github.kittinunf.fuel.httpGet
 import com.google.gson.GsonBuilder
-import java.util.Timer
-import kotlin.concurrent.schedule
 import kotlin.system.exitProcess
 
 
@@ -71,19 +64,11 @@ lateinit var update: Button
 @SuppressLint("StaticFieldLeak")
 lateinit var div: View
 
-var linkUrl: String? = null
-var linkUrlHome: String? = null
-var linkUrlLock: String? = null
 var linkId: String? = null
 var linkIdHome: String? = null
 var linkIdLock: String? = null
 var setHome: Boolean = false
 var setLock: Boolean = false
-var id: String? = null
-
-var username: String? = null
-var terms: String? = null
-var blacklist: String? = null
 
 var post_url: String? = null
 var set_by: String? = null
@@ -94,15 +79,8 @@ var set_by_home: String? = null
 var post_url_lock: String? = null
 var set_by_lock: String? = null
 
-var post_thumbnail_url: String? = null
-var post_description: String? = null
-
-var updated_at: String? = null
-var response_type: String? = null
-var response_text: String? = null
-
 lateinit var wl: WakeLock
-var receiver: BroadcastReceiver? = null
+var linkUpdateReceiver: android.content.BroadcastReceiver? = null
 var multiMode = false
 var new = false
 var livS = false
@@ -120,8 +98,6 @@ var liveUrl: String? = null
 var live_set_by: String? = null
 var versio: String = "0"
 
-var timeCheckT: Int = 10
-
 class MainActivity : AppCompatActivity() {
 
 
@@ -134,8 +110,6 @@ class MainActivity : AppCompatActivity() {
         version()
         orientation()
         theme()
-        obtainWallpaper()
-        configureReceiver()
 
 
 
@@ -150,7 +124,8 @@ class MainActivity : AppCompatActivity() {
         panic = findViewById(R.id.panic)
         update = findViewById(R.id.update)
         start = findViewById(R.id.start)
-        reset()
+        configureLinkUpdateReceiver()
+        obtainWallpaper()
         start.setOnClickListener {
             start()
         }
@@ -161,15 +136,15 @@ class MainActivity : AppCompatActivity() {
             panic()
         }
         update.setOnClickListener {
-            reset()
             obtainWallpaper()
-            reset()
-            obtainWallpaper()
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
+            Updater.forceReconnect(this)
+            Toast.makeText(this, "Reconnecting Walltaker...", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun version() {
-        versio = this.packageManager.getPackageInfo(this.packageName, 0).versionName
+        versio = this.packageManager.getPackageInfo(this.packageName, 0).versionName ?: "0"
     }
 
     @SuppressLint("SetTextI18n")
@@ -206,171 +181,18 @@ class MainActivity : AppCompatActivity() {
 
         multiMode = sharedPreferences.getBoolean("multimode", false)
         linkId = sharedPreferences.getString("id", "0")
-        linkUrl = "https://walltaker.joi.how/api/links/$linkId.json"
         linkIdHome = sharedPreferences.getString("IdHome", "0")
-        linkUrlHome = "https://walltaker.joi.how/api/links/$linkIdHome.json"
         linkIdLock = sharedPreferences.getString("IdLock", "0")
-        linkUrlLock = "https://walltaker.joi.how/api/links/$linkIdLock.json"
-        runOnUiThread {
-            if (multiMode) {
-                linkUrlHome!!.httpGet().header("User-Agent" to "Walltaker-Changer/$versio")
-                    .responseString { _, response, result ->
-                        if (response.statusCode == 200) {
-                            val gson = GsonBuilder().create()
-                            val data = gson.fromJson(result.get(), LinkData::class.java)
-                            post_url_home = ""
-                            if (data != null) {
-                                id = data.id
-                                //expires = data.expires
-                                username = data.username
-                                terms = data.terms
-                                blacklist = data.blacklist
-                                post_url_home = data.post_url
-                                post_thumbnail_url = data.post_thumbnail_url
-                                post_description = data.post_description
-                                //created_at = data.created_at
-                                updated_at = data.updated_at
-                                set_by = data.set_by
-                                response_type = data.response_type
-                                response_text = data.response_text
-                                //online = data.online
-                                runOnUiThread {
-                                    if (post_description != "") {
-                                        textHome.text =
-                                            if (set_by.isNullOrEmpty()) {
-                                                "HomeScreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            } else {
-                                                "HomeScreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            }
-                                    } else {
-                                        textHome.text =
-                                            if (set_by.isNullOrEmpty()) {
-                                                "HomeScreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            } else {
-                                                "HomeScreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            }
-                                    }
-                                }
-                                if (post_url_home != "") {
-                                    val handler = Handler(Looper.getMainLooper())
-                                    handler.post {
-                                        imageHome.scaleType = ImageView.ScaleType.CENTER_INSIDE
-                                        Glide.with(this@MainActivity).load(post_url_home)
-                                            .fitCenter().into(imageHome)
-                                        handler.removeCallbacksAndMessages(null)
-                                    }
-                                }
-
-
-                            }
-                        }
-                        linkUrlLock!!.httpGet().header("User-Agent" to "Walltaker-Changer/")
-                            .responseString { _, response2, result2 ->
-                                if (response2.statusCode == 200) {
-                                    val gson = GsonBuilder().create()
-                                    val data = gson.fromJson(result2.get(), LinkData::class.java)
-                                    post_url_lock = ""
-                                    if (data != null) {
-                                        id = data.id
-                                        //expires = data.expires
-                                        username = data.username
-                                        terms = data.terms
-                                        blacklist = data.blacklist
-                                        post_url_lock = data.post_url
-                                        post_thumbnail_url = data.post_thumbnail_url
-                                        post_description = data.post_description
-                                        //created_at = data.created_at
-                                        updated_at = data.updated_at
-                                        set_by = data.set_by
-                                        response_type = data.response_type
-                                        response_text = data.response_text
-                                        //online = data.online
-                                        runOnUiThread {
-                                            if (post_description != "") {
-                                                textLock.text =
-                                                    if (set_by.isNullOrEmpty()) {
-                                                        "Lockscreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                                    } else {
-                                                        "Lockscreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                                    }
-                                            } else {
-                                                textLock.text =
-                                                    if (set_by.isNullOrEmpty()) {
-                                                        "Lockscreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                                    } else {
-                                                        "Lockscreen Link\nYou are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                                    }
-                                            }
-                                        }
-                                        if (post_url_lock != "") {
-                                            val handler = Handler(Looper.getMainLooper())
-                                            handler.post {
-                                                imageHome.scaleType =
-                                                    ImageView.ScaleType.CENTER_INSIDE
-                                                Glide.with(this@MainActivity).load(post_url_lock)
-                                                    .fitCenter().into(imageLock)
-                                                handler.removeCallbacksAndMessages(null)
-                                            }
-                                        }
-
-
-                                    }
-                                }
-                            }
-                    }
-
-            } else {
-                linkUrl!!.httpGet().header("User-Agent" to "Walltaker-Changer/")
-                    .responseString { _, response, result ->
-                        if (response.statusCode == 200) {
-                            val gson = GsonBuilder().create()
-                            val data = gson.fromJson(result.get(), LinkData::class.java)
-                            post_url = ""
-                            if (data != null) {
-                                id = data.id
-                                //expires = data.expires
-                                username = data.username
-                                terms = data.terms
-                                blacklist = data.blacklist
-                                post_url = data.post_url
-                                post_thumbnail_url = data.post_thumbnail_url
-                                post_description = data.post_description
-                                //created_at = data.created_at
-                                updated_at = data.updated_at
-                                set_by = data.set_by
-                                response_type = data.response_type
-                                response_text = data.response_text
-                                //online = data.online
-                                runOnUiThread {
-                                    if (post_description != "") {
-                                        textHome.text =
-                                            if (set_by.isNullOrEmpty()) {
-                                                "You are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            } else {
-                                                "You are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe post description is $post_description\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            }
-                                    } else {
-                                        textHome.text =
-                                            if (set_by.isNullOrEmpty()) {
-                                                "You are using $username's id $id\n\nThe wallpaper has been set by an anonymous user\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            } else {
-                                                "You are using $username's id $id\n\nThe wallpaper has been set by $set_by\n\nThe link terms are: $terms\n\nThe blacklist tags are: $blacklist"
-                                            }
-                                    }
-                                }
-                                if (post_url != "") {
-                                    val handler = Handler(Looper.getMainLooper())
-                                    handler.post {
-                                        imageHome.scaleType = ImageView.ScaleType.CENTER_INSIDE
-                                        Glide.with(this@MainActivity).load(post_url).fitCenter()
-                                            .into(imageHome)
-                                        handler.removeCallbacksAndMessages(null)
-                                    }
-                                }
-                            }
-                        }
-                    }
-            }
+        reset()
+        textHome.text = if (multiMode) {
+            "Waiting for homescreen websocket update..."
+        } else {
+            "Waiting for websocket update..."
+        }
+        textLock.text = if (multiMode) {
+            "Waiting for lockscreen websocket update..."
+        } else {
+            ""
         }
     }
 
@@ -445,12 +267,7 @@ class MainActivity : AppCompatActivity() {
             stopService(Intent(this, Wallpapz::class.java))
             clos = true
         }
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, BroadcastReceiver::class.java)
-        val pendingIntent =
-            PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-        alarmManager.cancel(pendingIntent)
-        unregisterReceiver(receiver)
+        runCatching { linkUpdateReceiver?.let { unregisterReceiver(it) } }
         stopService(Intent(this, Service::class.java))
         finishAndRemoveTask()
         exitProcess(0)
@@ -473,12 +290,7 @@ class MainActivity : AppCompatActivity() {
                 stopService(Intent(this@MainActivity, Wallpapz::class.java))
                 clos = true
             }
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this@MainActivity, BroadcastReceiver::class.java)
-            val pendingIntent =
-                PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-            alarmManager.cancel(pendingIntent)
-            unregisterReceiver(receiver)
+            runCatching { linkUpdateReceiver?.let { unregisterReceiver(it) } }
 
             finishAndRemoveTask()
             exitProcess(0)
@@ -486,20 +298,27 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    @SuppressLint("ScheduleExactAlarm")
     private fun start() {
         val sharedPreferences: SharedPreferences =
             PreferenceManager.getDefaultSharedPreferences(this)
         multiMode = sharedPreferences.getBoolean("multimode", false)
         livS = sharedPreferences.getBoolean("liveS", false)
         livM = sharedPreferences.getBoolean("liveM", false)
+        linkId = sharedPreferences.getString("id", "0")
+        linkIdHome = sharedPreferences.getString("IdHome", "0")
+        linkIdLock = sharedPreferences.getString("IdLock", "0")
+        setHome = sharedPreferences.getBoolean("wallpaper", false)
+        setLock = sharedPreferences.getBoolean("lockscreen", false)
         if (!multiMode && (linkId == "0" || linkId.isNullOrEmpty()) ) {
             Toast.makeText(this, "Set an id", Toast.LENGTH_SHORT).show()
-        } else if (multiMode && (linkIdHome == "0" || linkIdLock == "0" || linkIdHome.isNullOrEmpty() || linkIdHome.isNullOrEmpty())) {
+        } else if (!multiMode && !livS && !setHome && !setLock) {
+            Toast.makeText(this, "Enable Homescreen or lockscreen", Toast.LENGTH_SHORT).show()
+        } else if (multiMode && (linkIdHome == "0" || linkIdLock == "0" || linkIdHome.isNullOrEmpty() || linkIdLock.isNullOrEmpty())) {
             Toast.makeText(this, "Set an id for multi mode", Toast.LENGTH_SHORT).show()
         } else if (livS || livM) {
             Toast.makeText(this, "Starting Walltaker Changer...", Toast.LENGTH_SHORT).show()
 
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
             startService(Intent(this, Wallpapz::class.java))
 
             val component = ComponentName(packageName, "$packageName.Wallpapz")
@@ -507,33 +326,12 @@ class MainActivity : AppCompatActivity() {
             intent2.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
             startActivity(intent2)
 
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this, BroadcastReceiver::class.java)
-            val pendingIntent =
-                PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pendingIntent
-            )
-
-            Timer().schedule(delay = 10000) {
-                finishAndRemoveTask()
-                exitProcess(0)
-            }
+            moveTaskToBack(true)
         } else {
             Toast.makeText(this, "Starting Walltaker Changer...", Toast.LENGTH_SHORT).show()
 
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this, BroadcastReceiver::class.java)
-            val pendingIntent =
-                PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pendingIntent
-            )
-            startService(Intent(this, Service::class.java))
-            finishAndRemoveTask()
-            exitProcess(0)
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
+            moveTaskToBack(true)
         }
     }
 
@@ -563,14 +361,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
-    private fun configureReceiver() {
+    private fun configureLinkUpdateReceiver() {
         val filter = IntentFilter()
-        filter.addAction("com.gios.walltakerchanger")
-        receiver = BroadcastReceiver()
+        filter.addAction(ACTION_WALLTAKER_LINK_UPDATE)
+        linkUpdateReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val linkJson = intent?.getStringExtra(EXTRA_WALLTAKER_LINK) ?: return
+                val target = intent.getStringExtra(EXTRA_WALLTAKER_TARGET) ?: return
+                val data = runCatching {
+                    GsonBuilder().create().fromJson(linkJson, LinkData::class.java)
+                }.getOrNull() ?: return
+
+                runOnUiThread {
+                    displayLinkUpdate(data, target)
+                }
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receiver, filter, RECEIVER_EXPORTED)
+            registerReceiver(linkUpdateReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(receiver, filter)
+            registerReceiver(linkUpdateReceiver, filter)
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun displayLinkUpdate(data: LinkData, target: String) {
+        val targetText = when (target) {
+            "HOME" -> textHome
+            "LOCK" -> textLock
+            "LIVE" -> textHome
+            else -> textHome
+        }
+        val targetImage = when (target) {
+            "LOCK" -> imageLock
+            else -> imageHome
+        }
+        val heading = when (target) {
+            "HOME" -> "HomeScreen Link\n"
+            "LOCK" -> "Lockscreen Link\n"
+            else -> ""
+        }
+        val setter = if (data.set_by.isNullOrEmpty()) {
+            "The wallpaper has been set by an anonymous user"
+        } else {
+            "The wallpaper has been set by ${data.set_by}"
+        }
+        val description = if (data.post_description.isNullOrEmpty()) {
+            ""
+        } else {
+            "\n\nThe post description is ${data.post_description}"
+        }
+
+        targetText.text =
+            "${heading}You are using ${data.username}'s id ${data.id}\n\n$setter$description\n\nThe link terms are: ${data.terms}\n\nThe blacklist tags are: ${data.blacklist}"
+
+        if (!data.post_url.isNullOrEmpty()) {
+            targetImage.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            Glide.with(this).load(data.post_url).fitCenter().into(targetImage)
         }
     }
 }
@@ -578,17 +425,11 @@ class MainActivity : AppCompatActivity() {
 @Suppress("PropertyName")
 class LinkData(
     var id: String,
-    //var expires: String,
     var username: String,
     var terms: String,
     var blacklist: String,
     var post_url: String,
     var post_thumbnail_url: String,
     var post_description: String,
-    //var created_at: String,
-    var updated_at: String,
     var set_by: String,
-    var response_type: String,
-    var response_text: String,
-    //var online: Boolean
 )

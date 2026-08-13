@@ -1,15 +1,16 @@
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <PreferenceCategory app:title="@string/set_your_id_and_choose_where_to_show_the_wallpaper">
+        <EditTextPreference
+            app:key="serverUrl"
+            app:title="Walltaker server"
+            app:summary="Server used for API and websocket connections"
+            app:defaultValue="https://walltaker.joi.how"
+            app:useSimpleSummaryProvider="true" />
         <SwitchPreferenceCompat
             app:key="notifi"
             app:title="Notifications"
             app:summary="show notification when a new wallpaper is set"/>
-            <EditTextPreference
-                app:key="timeCheck"
-                app:title="Check time"
-                app:summary="Timer to check the links in seconds"
-                app:defaultValue="10"/>
         <PreferenceCategory app:title="Single mode">
             <EditTextPreference
                 app:key="id"
@@ -21,7 +22,7 @@
             app:summary="Allows the image to be set as homescreen"
             app:title="Homescreen" />
         <SwitchPreferenceCompat
-            app:key="Lockscreen"
+            app:key="lockscreen"
             app:summary="Allows the image to be set as lockscreen"
             app:title="lockscreen" />
         <SwitchPreferenceCompat

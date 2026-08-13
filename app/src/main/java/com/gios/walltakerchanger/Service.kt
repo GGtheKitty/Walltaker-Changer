@@ -1,40 +1,54 @@
 package com.gios.walltakerchanger
 
 
-import android.annotation.SuppressLint
-import android.app.AlarmManager
-import android.app.PendingIntent
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
+import androidx.core.app.NotificationCompat
 
 
 class Service : Service() {
+    private val channelId = "walltaker_changer_service"
+
     override fun onBind(intent: Intent?): IBinder? {
         return null
     }
 
-    @SuppressLint("ScheduleExactAlarm")
     override fun onCreate() {
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, BroadcastReceiver::class.java)
-        val alarmIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            System.currentTimeMillis() + 10000,
-            alarmIntent
-        )
+        startForeground(1, serviceNotification())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Updater.update(this)
-        return super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
 
     override fun onDestroy() {
-        unregisterReceiver(receiver)
+        Updater.stop()
     }
+
+    private fun serviceNotification() =
+        NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setContentTitle("Walltaker Changer is connected")
+            .setContentText("Listening for wallpaper updates")
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .also {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val notificationManager =
+                        getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    val channel = NotificationChannel(
+                        channelId,
+                        "Walltaker Changer service",
+                        NotificationManager.IMPORTANCE_LOW
+                    )
+                    notificationManager.createNotificationChannel(channel)
+                }
+            }
+            .build()
 }
