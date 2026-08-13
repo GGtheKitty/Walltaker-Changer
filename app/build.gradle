@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.gios.walltakerchanger'
-    compileSdk 36
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.gios.walltakerchanger"
         minSdk 24
-        targetSdk 36
+        targetSdk 34
         versionCode 1
         versionName "3.1.0"
 
