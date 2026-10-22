@@ -36,7 +36,7 @@
             app:title="Fit wallpaper"/>
         <SwitchPreferenceCompat
             app:key="liveS"
-            app:summary="Allows gifs to be set"
+            app:summary="Allows GIFs. Confirm the wallpaper destination in the Android setup screen."
             app:title="Live wallpaper"/>
         <SwitchPreferenceCompat
             app:key="iFitLive"
@@ -64,7 +64,7 @@
             app:title="Fit homescreen"/>
         <SwitchPreferenceCompat
             app:key="liveM"
-            app:summary="Allows gifs to be set"
+            app:summary="Allows GIFs. Confirm the wallpaper destination in the Android setup screen."
             app:title="Live wallpaper" />
         <SwitchPreferenceCompat
             app:key="iFitLive"

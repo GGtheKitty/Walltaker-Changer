@@ -18,17 +18,23 @@ class Service : Service() {
     }
 
     override fun onCreate() {
+        super.onCreate()
         startForeground(1, serviceNotification())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Updater.update(this)
+        if (intent?.getBooleanExtra("reconnect", false) == true) {
+            Updater.forceReconnect(this)
+        } else {
+            Updater.update(this)
+        }
         return START_STICKY
     }
 
 
     override fun onDestroy() {
         Updater.stop()
+        super.onDestroy()
     }
 
     private fun serviceNotification() =

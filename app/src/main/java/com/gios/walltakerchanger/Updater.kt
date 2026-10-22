@@ -27,9 +27,11 @@ import com.github.kittinunf.fuel.Fuel
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -49,6 +51,8 @@ class Updater {
         private val gson = GsonBuilder().create()
         private val handler = Handler(Looper.getMainLooper())
         private val lock = Any()
+        private val wallpaperScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val wallpaperMutex = Mutex()
         private val client = OkHttpClient.Builder()
             .pingInterval(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
@@ -129,8 +133,8 @@ class Updater {
                 PreferenceManager.getDefaultSharedPreferences(context)
 
             multiMode = sharedPreferences.getBoolean("multimode", false)
-            livS = sharedPreferences.getBoolean("liveS", false)
-            livM = sharedPreferences.getBoolean("liveM", false)
+            livS = !multiMode && sharedPreferences.getBoolean("liveS", false)
+            livM = multiMode && sharedPreferences.getBoolean("liveM", false)
             iFit = sharedPreferences.getBoolean("iFit", false)
             iFitH = sharedPreferences.getBoolean("iFitH", false)
             iFitL = sharedPreferences.getBoolean("iFitL", false)
@@ -384,8 +388,9 @@ class Updater {
                 if (sharedPreferences.getBoolean(downloadKey, false)) {
                     downloadFile(post_url)
                 }
-                new = true
                 liveUrl = data.post_url
+                sharedPreferences.edit().putString("lastLiveWallpaperUrl", liveUrl).apply()
+                new = true
             }
         }
 
@@ -421,59 +426,50 @@ class Updater {
                 notifier(context)
             }
 
-            lateinit var bitmap: Bitmap
-            val wallpaperManager = WallpaperManager.getInstance(context)
-            runBlocking {
-                val job = launch {
-                    val displayMetrics = DisplayMetrics()
-                    val windowsManager =
-                        context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                    windowsManager.defaultDisplay.getMetrics(displayMetrics)
-                    val width = displayMetrics.widthPixels
-                    val height = displayMetrics.heightPixels
+            wallpaperScope.launch {
+                wallpaperMutex.withLock {
+                    try {
+                        val wallpaperManager = WallpaperManager.getInstance(context)
+                        val displayMetrics = DisplayMetrics()
+                        val windowsManager =
+                            context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                        windowsManager.defaultDisplay.getMetrics(displayMetrics)
+                        val width = displayMetrics.widthPixels
+                        val height = displayMetrics.heightPixels
 
-                    val futureTarget: FutureTarget<Bitmap> =
-                        loadBitmapTarget(context, imageUrl, width, height)
-                    bitmap = withContext(Dispatchers.IO) {
+                        val futureTarget = loadBitmapTarget(context, imageUrl, width, height)
+                        // Keep the Glide resource acquired until setBitmap finishes using it.
+                        var acquiredTarget = futureTarget
                         try {
-                            futureTarget.get()
-                        } catch (e: Exception) {
-                            Glide.with(context).clear(futureTarget)
-                            if (data.post_thumbnail_url.isNullOrEmpty()) {
-                                throw e
+                            var bitmap = try {
+                                futureTarget.get()
+                            } catch (e: Exception) {
+                                Glide.with(context).clear(futureTarget)
+                                if (data.post_thumbnail_url.isNullOrEmpty()) throw e
+                                Log.w(TAG, "Failed to load post_url, trying thumbnail fallback: $imageUrl", e)
+                                acquiredTarget = loadBitmapTarget(context, data.post_thumbnail_url, width, height)
+                                acquiredTarget.get()
                             }
-                            Log.w(TAG, "Failed to load post_url, trying thumbnail fallback: $imageUrl", e)
-                            val fallbackTarget =
-                                loadBitmapTarget(context, data.post_thumbnail_url, width, height)
-                            try {
-                                fallbackTarget.get()
-                            } finally {
-                                Glide.with(context).clear(fallbackTarget)
+                            if (phone && bitmap.width >= bitmap.height) {
+                                bitmap = bitmapRotator(bitmap)
                             }
+                            bitmap = if (fitImage) {
+                                bitmapResizer(bitmap, height, width)
+                            } else {
+                                returnBitmap(bitmap, width, height)
+                            }
+                            val flags = wallpaperFlags.fold(0) { result, flag -> result or flag }
+                            check(wallpaperManager.setBitmap(bitmap, null, true, flags) != 0) {
+                                "Android did not apply the wallpaper"
+                            }
+                            updateLastUrl(imageUrl)
+                        } finally {
+                            Glide.with(context).clear(acquiredTarget)
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to load or set wallpaper for $imageUrl", e)
+                        updateLastUrl("")
                     }
-                    val oriz: Boolean = bitmap.width >= bitmap.height
-                    if (phone && oriz) {
-                        bitmap = bitmapRotator(bitmap)
-                    }
-                    bitmap =
-                        if (fitImage) {
-                            bitmapResizer(bitmap, height, width)
-                        } else {
-                            returnBitmap(bitmap, width, height)
-                        }
-                    Glide.with(context).clear(futureTarget)
-                }
-                job.join()
-                try {
-                    println("Setting wallpaper")
-                    wallpaperFlags.forEach { wallpaperFlag ->
-                        wallpaperManager.setBitmap(bitmap, null, true, wallpaperFlag)
-                    }
-                    updateLastUrl(imageUrl)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set wallpaper for $imageUrl", e)
-                    updateLastUrl("")
                 }
             }
 

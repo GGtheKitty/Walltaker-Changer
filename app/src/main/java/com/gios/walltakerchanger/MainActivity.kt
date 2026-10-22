@@ -94,7 +94,7 @@ var panicHome = ""
 var panicLock = ""
 var phone = false
 var notifi = false
-var liveUrl: String? = null
+@Volatile var liveUrl: String? = null
 var live_set_by: String? = null
 var versio: String = "0"
 
@@ -315,22 +315,26 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Enable Homescreen or lockscreen", Toast.LENGTH_SHORT).show()
         } else if (multiMode && (linkIdHome == "0" || linkIdLock == "0" || linkIdHome.isNullOrEmpty() || linkIdLock.isNullOrEmpty())) {
             Toast.makeText(this, "Set an id for multi mode", Toast.LENGTH_SHORT).show()
-        } else if (livS || livM) {
+        } else if (if (multiMode) livM else livS) {
             Toast.makeText(this, "Starting Walltaker Changer...", Toast.LENGTH_SHORT).show()
 
-            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
-            startService(Intent(this, Wallpapz::class.java))
-
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java)
+                .putExtra("reconnect", true))
             val component = ComponentName(packageName, "$packageName.Wallpapz")
+            if (WallpaperManager.getInstance(this).wallpaperInfo?.component == component) {
+                moveTaskToBack(true)
+                return
+            }
             val intent2 = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
             intent2.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
             startActivity(intent2)
 
-            moveTaskToBack(true)
+            // Keep Android's live wallpaper confirmation visible until the user finishes it.
         } else {
             Toast.makeText(this, "Starting Walltaker Changer...", Toast.LENGTH_SHORT).show()
 
-            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java)
+                .putExtra("reconnect", true))
             moveTaskToBack(true)
         }
     }
