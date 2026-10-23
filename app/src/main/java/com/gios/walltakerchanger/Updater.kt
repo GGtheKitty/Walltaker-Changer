@@ -16,6 +16,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -66,8 +67,7 @@ class Updater {
         private var lastLockData: LinkData? = null
         private var lastLiveData: LinkData? = null
         private var activeKey = ""
-        private var reconnectPending = false
-        private val sockets = mutableListOf<WebSocket>()
+        private val sockets = mutableListOf<ReconnectingWebSocket>()
 
         fun update(context: Context) {
             val appContext = context.applicationContext
@@ -81,27 +81,29 @@ class Updater {
                 if (newKey == activeKey && sockets.isNotEmpty()) {
                     return
                 }
+                Log.i(TAG, "Starting Walltaker connections for ${subscriptions.joinToString { it.target.name }}")
                 closeSockets()
                 activeKey = newKey
-                reconnectPending = false
                 subscriptions.forEach { subscription ->
-                    sockets.add(openSocket(appContext, cableUrl, subscription))
+                    val connection = openSocket(appContext, cableUrl, subscription)
+                    sockets.add(connection)
+                    connection.start()
                 }
             }
         }
 
         fun stop() {
             synchronized(lock) {
+                Log.i(TAG, "Stopping Walltaker connections")
                 activeKey = ""
-                reconnectPending = false
                 closeSockets()
             }
         }
 
         fun forceReconnect(context: Context) {
             synchronized(lock) {
+                Log.i(TAG, "Walltaker reconnect explicitly requested")
                 activeKey = ""
-                reconnectPending = false
                 closeSockets()
             }
             update(context)
@@ -225,14 +227,15 @@ class Updater {
             context: Context,
             cableUrl: String,
             subscription: LinkSubscription
-        ): WebSocket {
+        ): ReconnectingWebSocket {
             val request = Request.Builder()
                 .url(cableUrl)
                 .header("User-Agent", "Walltaker-Changer/$versio")
                 .build()
 
-            return client.newWebSocket(request, object : WebSocketListener() {
+            val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.i(TAG, "Walltaker websocket opened for ${subscription.target}")
                     val identifier = JsonObject().apply {
                         addProperty("channel", "LinkChannel")
                         val numericLinkId = subscription.linkId?.toIntOrNull()
@@ -255,6 +258,11 @@ class Updater {
                         gson.fromJson(text, JsonObject::class.java)
                     }.getOrNull() ?: return
 
+                    when (envelope.get("type")?.asString) {
+                        "confirm_subscription" -> Log.i(TAG, "Walltaker subscription confirmed for ${subscription.target}")
+                        "reject_subscription" -> Log.w(TAG, "Walltaker subscription rejected for ${subscription.target}")
+                        "disconnect" -> Log.w(TAG, "Walltaker server requested disconnect: $text")
+                    }
                     val messageElement = envelope.get("message") ?: return
                     if (!messageElement.isJsonObject) {
                         return
@@ -273,38 +281,28 @@ class Updater {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.w(TAG, "Walltaker websocket failed: ${t.message}", t)
-                    scheduleReconnect(context)
+                    Log.w(TAG, "Walltaker ${subscription.target} websocket failed (HTTP ${response?.code}): ${t.message}", t)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.i(TAG, "Walltaker websocket closed: code=$code reason=$reason")
-                    if (code == 1000 && reason == "settings changed") {
-                        return
-                    }
-                    scheduleReconnect(context)
+                    Log.i(TAG, "Walltaker ${subscription.target} websocket closed: code=$code reason=$reason")
                 }
-            })
-        }
-
-        private fun scheduleReconnect(context: Context) {
-            synchronized(lock) {
-                if (reconnectPending || activeKey.isEmpty()) {
-                    return
-                }
-                reconnectPending = true
             }
-            handler.postDelayed({
-                synchronized(lock) {
-                    reconnectPending = false
-                    activeKey = ""
+            return ReconnectingWebSocket(
+                factory = client,
+                request = request,
+                postDelayed = { task, delay -> handler.postDelayed(task, delay) },
+                removeCallback = { handler.removeCallbacks(it) },
+                now = { SystemClock.elapsedRealtime() },
+                listener = listener,
+                onRetry = { delay ->
+                    Log.i(TAG, "Retrying Walltaker ${subscription.target} websocket in ${delay / 1000}s")
                 }
-                update(context)
-            }, 10000)
+            )
         }
 
         private fun closeSockets() {
-            sockets.forEach { it.close(1000, "settings changed") }
+            sockets.forEach { it.stop() }
             sockets.clear()
         }
 

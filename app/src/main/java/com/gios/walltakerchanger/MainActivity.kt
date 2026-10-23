@@ -137,8 +137,8 @@ class MainActivity : AppCompatActivity() {
         }
         update.setOnClickListener {
             obtainWallpaper()
-            ContextCompat.startForegroundService(this, Intent(this, Service::class.java))
-            Updater.forceReconnect(this)
+            ContextCompat.startForegroundService(this, Intent(this, Service::class.java)
+                .putExtra("reconnect", true))
             Toast.makeText(this, "Reconnecting Walltaker...", Toast.LENGTH_SHORT).show()
         }
     }
